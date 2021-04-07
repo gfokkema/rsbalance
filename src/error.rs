@@ -6,6 +6,7 @@ pub type Result<T> = result::Result<T, HAError>;
 pub enum HAError {
     Config(config::ConfigError),
     Net(std::io::Error),
+    Foreign(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl fmt::Debug for HAError {
@@ -19,6 +20,7 @@ impl fmt::Display for HAError {
         match *self {
             HAError::Config(ref _e) => write!(f, "Invalid configuration!"),
             HAError::Net(ref _e) => write!(f, "Network error!"),
+            HAError::Foreign(ref _e) => write!(f, "Foreign error!"),
         }
     }
 }
@@ -32,5 +34,11 @@ impl From<std::io::Error> for HAError {
 impl From<config::ConfigError> for HAError {
     fn from(err: config::ConfigError) -> HAError {
         HAError::Config(err)
+    }
+}
+
+impl From<Box<dyn std::error::Error + Send + Sync>> for HAError {
+    fn from(err: Box<dyn std::error::Error + Send + Sync>) -> HAError {
+        HAError::Foreign(err)
     }
 }

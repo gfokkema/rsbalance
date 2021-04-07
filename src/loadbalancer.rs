@@ -1,31 +1,35 @@
-use std::net::{ToSocketAddrs, SocketAddr};
-use std::net::{TcpListener, TcpStream};
 use crate::error::Result;
 use crate::settings::Settings;
 
-pub struct LoadBalancer {
-    listener: TcpListener,
-    targets: Vec<SocketAddr>,
+use std::future::Future;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::time::{sleep, Duration};
+use tracing::{error, info};
+
+async fn process(socket: TcpStream) {
+    info!("processing {:?}", socket);
+    tokio::time::sleep(Duration::from_millis(5000)).await;
+    info!("finished {:?}", socket);
 }
 
-impl LoadBalancer {
-    pub fn new(settings: Settings) -> Result<Self> {
-        let lb = LoadBalancer {
-            listener: TcpListener::bind((&settings.frontend.addr[..], settings.frontend.port))?,
-            targets: settings.backend.servers.iter().flat_map(|s| (&s.addr[..], s.port).to_socket_addrs().unwrap()).collect(),
-        };
-        println!("{:?}", lb.listener);
-        Ok(lb)
+async fn listen(listener: TcpListener) -> Result<()> {
+    loop {
+        let (socket, _) = listener.accept().await?;
+        tokio::spawn(async move { process(socket) });
     }
+}
 
-    pub fn run(&self) -> Result<()> {
-        for stream in self.listener.incoming() {
-            handle_client(stream?);
+pub async fn run(listener: TcpListener, _settings: Settings, shutdown: impl Future) -> Result<()> {
+    tokio::select! {
+        res = listen(listener) => {
+            match res {
+                Err(err) => Err(err),
+                Ok(_) => Ok(()),
+            }
         }
-        Ok(())
+        _ = shutdown => {
+            info!("shutting down");
+            Ok(())
+        }
     }
-}
-
-fn handle_client(stream: TcpStream) {
-    println!("{:?}", stream);
 }

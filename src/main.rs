@@ -5,17 +5,25 @@ extern crate serde;
 extern crate serde_derive;
 
 mod error;
-mod settings;
 mod loadbalancer;
+mod settings;
+
+use tokio::net::TcpListener;
+use tokio::signal;
 
 use error::Result;
 use settings::Settings;
-use loadbalancer::LoadBalancer;
 
-fn main() -> Result<()> {
+#[tokio::main]
+pub async fn main() -> Result<()> {
+    tracing_subscriber::fmt::try_init()?;
+
     let settings = Settings::new()?;
-    let loadbalancer = LoadBalancer::new(settings)?;
-    loadbalancer.run()?;
+    let listener = TcpListener::bind((&settings.frontend.addr[..], settings.frontend.port)).await?;
+
+    tracing::info!("Starting...");
+    loadbalancer::run(listener, settings, signal::ctrl_c()).await?;
+    tracing::info!("Ending...");
 
     Ok(())
 }
