@@ -1,18 +1,9 @@
-extern crate config;
-extern crate serde;
-
-#[macro_use]
-extern crate serde_derive;
-
-mod error;
-mod loadbalancer;
-mod settings;
+use rsbalance::error::Result;
+use rsbalance::loadbalancer;
+use rsbalance::settings::Settings;
 
 use tokio::net::TcpListener;
 use tokio::signal;
-
-use error::Result;
-use settings::Settings;
 
 #[tokio::main]
 pub async fn main() -> Result<()> {

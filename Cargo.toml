@@ -1,5 +1,5 @@
 [package]
-name = "rsha"
+name = "rsbalance"
 version = "0.1.0"
 authors = ["Gerlof Fokkema <fokkema@redkiwi.nl>"]
 edition = "2018"
