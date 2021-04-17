@@ -1,21 +1,27 @@
-use config::{ConfigError, Config, File, Environment};
+use config::{Config, ConfigError, Environment, File};
+use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
-pub struct Address {
+pub struct Frontend {
     pub addr: String,
-    pub port: u16,
+    pub backend: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Server {
+    pub addr: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Backend {
-    pub servers: Vec<Address>
+    pub servers: Vec<Server>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Settings {
+    pub frontends: HashMap<String, Frontend>,
+    pub backends: HashMap<String, Backend>,
     pub debug: bool,
-    pub frontend: Address,
-    pub backend: Backend,
 }
 
 impl Settings {

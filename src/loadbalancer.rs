@@ -1,10 +1,89 @@
 use crate::error::Result;
-use crate::settings::Settings;
+use crate::settings;
 
+use std::collections::HashMap;
 use std::future::Future;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::broadcast;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info};
+
+pub struct Server {
+    addr: SocketAddr,
+}
+
+pub struct Backend {
+    servers: Vec<Server>,
+}
+
+pub struct Frontend {
+    addr: SocketAddr,
+    backend: Arc<Backend>,
+}
+
+pub struct LoadBalancer {
+    frontends: HashMap<String, Arc<Frontend>>,
+    backends: HashMap<String, Arc<Backend>>,
+}
+
+impl LoadBalancer {
+    pub fn new(settings: &settings::Settings) -> Self {
+        let backends: HashMap<String, Arc<Backend>> = settings
+            .backends
+            .iter()
+            .map(|(k, v)| {
+                let backend = Backend {
+                    servers: v
+                        .servers
+                        .iter()
+                        .map(|v| Server {
+                            addr: v.addr.parse().unwrap(),
+                        })
+                        .collect(),
+                };
+                (k.clone(), Arc::new(backend))
+            })
+            .collect();
+
+        let frontends: HashMap<String, Arc<Frontend>> = settings
+            .frontends
+            .iter()
+            .map(|(k, v)| {
+                let frontend = Frontend {
+                    addr: v.addr.parse().unwrap(),
+                    backend: backends.get(&v.backend).unwrap().clone(),
+                };
+                (k.clone(), Arc::new(frontend))
+            })
+            .collect();
+
+        LoadBalancer {
+            frontends,
+            backends,
+        }
+    }
+
+    pub async fn run(&self, shutdown: impl Future) -> Result<()> {
+        info!("starting...");
+        let (send_shutdown, _): (broadcast::Sender<()>, _) = broadcast::channel(1);
+        for (_, frontend) in self.frontends.iter() {
+            let listener = TcpListener::bind(frontend.addr).await?;
+            let recv_shutdown = send_shutdown.subscribe();
+            tokio::spawn(async move { listen(listener, recv_shutdown).await });
+        }
+
+        tokio::select! {
+            _ = shutdown => {
+                tracing::info!("shutting down");
+                let _ = send_shutdown.send(());
+            }
+        }
+        info!("ending...");
+        Ok(())
+    }
+}
 
 async fn process(socket: TcpStream) {
     info!("processing {:?}", socket);
@@ -12,24 +91,10 @@ async fn process(socket: TcpStream) {
     info!("finished {:?}", socket);
 }
 
-async fn listen(listener: TcpListener) -> Result<()> {
+async fn listen(listener: TcpListener, _shutdown: broadcast::Receiver<()>) -> Result<()> {
+    info!("accepting...");
     loop {
         let (socket, _) = listener.accept().await?;
-        tokio::spawn(async move { process(socket) });
-    }
-}
-
-pub async fn run(listener: TcpListener, _settings: Settings, shutdown: impl Future) -> Result<()> {
-    tokio::select! {
-        res = listen(listener) => {
-            match res {
-                Err(err) => Err(err),
-                Ok(_) => Ok(()),
-            }
-        }
-        _ = shutdown => {
-            info!("shutting down");
-            Ok(())
-        }
+        tokio::spawn(async move { process(socket).await });
     }
 }

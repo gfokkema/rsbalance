@@ -1,10 +1,17 @@
 debug: False
 
-frontend:
-  addr: 127.0.0.1
-  port: 8080
+frontends:
+  test1:
+    addr: 127.0.0.1:8080
+    backend: test1
+  test2:
+    addr: 127.0.0.1:8081
+    backend: test2
 
-backend:
-  servers:
-    - addr: 127.0.0.1
-      port: 8081
+backends:
+  test1:
+    servers:
+      - addr: 127.0.0.1:8090
+  test2:
+    servers:
+      - addr: 127.0.0.1:8091
