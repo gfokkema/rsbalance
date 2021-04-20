@@ -12,6 +12,7 @@ backends:
   test1:
     servers:
       - addr: 127.0.0.1:8090
+      - addr: 127.0.0.1:8091
   test2:
     servers:
       - addr: 127.0.0.1:8091

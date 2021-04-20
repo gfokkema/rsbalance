@@ -5,9 +5,9 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::io::{self, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
-use tokio::time::{sleep, Duration};
 use tracing::{error, info};
 
 pub struct Server {
@@ -26,6 +26,30 @@ pub struct Frontend {
 pub struct LoadBalancer {
     frontends: HashMap<String, Arc<Frontend>>,
     backends: HashMap<String, Arc<Backend>>,
+}
+
+impl Backend {
+    pub fn iter(&self) -> impl std::iter::Iterator<Item = &Server> {
+        std::iter::Iterator::cycle(self.servers.iter())
+    }
+}
+
+impl Frontend {
+    async fn listen(&self, shutdown: broadcast::Receiver<()>) -> Result<()> {
+        info!("listening...");
+        let listener = TcpListener::bind(self.addr).await?;
+        let mut iter = self.backend.iter();
+        loop {
+            let (inbound, _) = listener.accept().await?;
+            let addr = iter.next().unwrap().addr;
+            tokio::spawn(async move {
+                info!("processing {:?}", inbound);
+                let outbound = TcpStream::connect(addr).await?;
+                info!("connected {:?}", outbound);
+                process(inbound, outbound).await
+            });
+        }
+    }
 }
 
 impl LoadBalancer {
@@ -69,9 +93,9 @@ impl LoadBalancer {
         info!("starting...");
         let (send_shutdown, _): (broadcast::Sender<()>, _) = broadcast::channel(1);
         for (_, frontend) in self.frontends.iter() {
-            let listener = TcpListener::bind(frontend.addr).await?;
+            let frontend = frontend.clone();
             let recv_shutdown = send_shutdown.subscribe();
-            tokio::spawn(async move { listen(listener, recv_shutdown).await });
+            tokio::spawn(async move { frontend.listen(recv_shutdown).await });
         }
 
         tokio::select! {
@@ -85,16 +109,21 @@ impl LoadBalancer {
     }
 }
 
-async fn process(socket: TcpStream) {
-    info!("processing {:?}", socket);
-    tokio::time::sleep(Duration::from_millis(5000)).await;
-    info!("finished {:?}", socket);
-}
+async fn process(mut inbound: TcpStream, mut outbound: TcpStream) -> Result<()> {
+    let (mut ri, mut wi) = inbound.split();
+    let (mut ro, mut wo) = outbound.split();
 
-async fn listen(listener: TcpListener, _shutdown: broadcast::Receiver<()>) -> Result<()> {
-    info!("accepting...");
-    loop {
-        let (socket, _) = listener.accept().await?;
-        tokio::spawn(async move { process(socket).await });
-    }
+    let client_to_server = async {
+        io::copy(&mut ri, &mut wo).await?;
+        wo.shutdown().await
+    };
+
+    let server_to_client = async {
+        io::copy(&mut ro, &mut wi).await?;
+        wi.shutdown().await
+    };
+
+    tokio::try_join!(client_to_server, server_to_client)?;
+
+    Ok(())
 }
